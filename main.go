@@ -33,9 +33,9 @@ var toolNames = []string{
 }
 
 type Vertex struct {
-	X, Y   float64
-	Label  string
-	Color  color.RGBA
+	X, Y  float64
+	Label string
+	Color color.RGBA
 }
 
 type Graph struct {
@@ -46,18 +46,16 @@ type Graph struct {
 
 type App struct {
 	Graph         *Graph
-	Selected      *int  // Index of the selected vertex
-	Tool          Tool  // Current active tool
-	EdgeStart     *int  // Start vertex for adding an edge
-	MovingVertex  *int  // Index of the vertex being moved
+	Selected      *int // Index of the selected vertex
+	Tool          Tool // Current active tool
+	EdgeStart     *int // Start vertex for adding an edge
+	MovingVertex  *int // Index of the vertex being moved
 	LastClickTime time.Time
 }
 
 // AddVertex adds a new vertex to the graph.
 func (g *Graph) AddVertex(x, y float64, label string, clr color.RGBA) {
 	g.Vertices = append(g.Vertices, Vertex{X: x, Y: y, Label: label, Color: clr})
-
-	// Resize the adjacency matrix
 	for i := range g.AdjMatrix {
 		g.AdjMatrix[i] = append(g.AdjMatrix[i], 0)
 	}
@@ -72,6 +70,18 @@ func (g *Graph) AddEdge(v1, v2 int) {
 	g.AdjMatrix[v1][v2]++
 	if !g.IsDirected {
 		g.AdjMatrix[v2][v1]++
+	}
+}
+
+// DeleteVertex removes a vertex and its associated edges.
+func (g *Graph) DeleteVertex(index int) {
+	if index < 0 || index >= len(g.Vertices) {
+		return
+	}
+	g.Vertices = append(g.Vertices[:index], g.Vertices[index+1:]...)
+	g.AdjMatrix = append(g.AdjMatrix[:index], g.AdjMatrix[index+1:]...)
+	for i := range g.AdjMatrix {
+		g.AdjMatrix[i] = append(g.AdjMatrix[i][:index], g.AdjMatrix[i][index+1:]...)
 	}
 }
 
@@ -94,8 +104,7 @@ func NewApp() *App {
 			AdjMatrix:  [][]int{},
 			IsDirected: false,
 		},
-		Tool:          ToolAddVertex,
-		LastClickTime: time.Now(),
+		Tool: ToolAddVertex,
 	}
 }
 
@@ -106,7 +115,7 @@ func (app *App) HandleMouseInput() {
 
 	if y < 40 {
 		// Toolbar interaction
-		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			app.Tool = Tool(x / 100)
 		}
 		return
@@ -115,13 +124,8 @@ func (app *App) HandleMouseInput() {
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		switch app.Tool {
 		case ToolAddVertex:
-			// Prevent rapid-fire placement
-			if time.Since(app.LastClickTime) > 200*time.Millisecond {
-				app.Graph.AddVertex(mx, my, fmt.Sprintf("V%d", len(app.Graph.Vertices)+1), color.RGBA{255, 0, 0, 255})
-				app.LastClickTime = time.Now()
-			}
+			app.Graph.AddVertex(mx, my, fmt.Sprintf("V%d", len(app.Graph.Vertices)+1), color.RGBA{255, 0, 0, 255})
 		case ToolAddEdge:
-			// Handle adding edges
 			for i, v := range app.Graph.Vertices {
 				if math.Hypot(v.X-mx, v.Y-my) < 15 {
 					if app.EdgeStart == nil {
@@ -133,8 +137,14 @@ func (app *App) HandleMouseInput() {
 					return
 				}
 			}
+		case ToolDeleteVertex:
+			for i, v := range app.Graph.Vertices {
+				if math.Hypot(v.X-mx, v.Y-my) < 15 {
+					app.Graph.DeleteVertex(i)
+					return
+				}
+			}
 		case ToolDeleteEdge:
-			// Handle deleting edges
 			for i, v1 := range app.Graph.Vertices {
 				if math.Hypot(v1.X-mx, v1.Y-my) < 15 {
 					for j := range app.Graph.Vertices {
@@ -145,12 +155,18 @@ func (app *App) HandleMouseInput() {
 					}
 				}
 			}
+		case ToolColorVertex:
+			for i, v := range app.Graph.Vertices {
+				if math.Hypot(v.X-mx, v.Y-my) < 15 {
+					app.Graph.Vertices[i].Color = color.RGBA{0, 255, 0, 255} // Green color
+					return
+				}
+			}
 		}
 	}
 
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		switch app.Tool {
-		case ToolMoveVertex:
+		if app.Tool == ToolMoveVertex {
 			for i, v := range app.Graph.Vertices {
 				if math.Hypot(v.X-mx, v.Y-my) < 15 {
 					app.MovingVertex = &i
@@ -160,13 +176,6 @@ func (app *App) HandleMouseInput() {
 			if app.MovingVertex != nil {
 				v := &app.Graph.Vertices[*app.MovingVertex]
 				v.X, v.Y = mx, my
-			}
-		case ToolColorVertex:
-			for i, v := range app.Graph.Vertices {
-				if math.Hypot(v.X-mx, v.Y-my) < 15 {
-					app.Graph.Vertices[i].Color = color.RGBA{0, 0, 255, 255} // Set to blue
-					return
-				}
 			}
 		}
 	}
@@ -178,7 +187,6 @@ func (app *App) HandleMouseInput() {
 
 // Draw renders the application.
 func (app *App) Draw(screen *ebiten.Image) {
-	// Draw toolbar
 	for i, name := range toolNames {
 		bgColor := color.RGBA{200, 200, 200, 255}
 		if Tool(i) == app.Tool {
@@ -188,22 +196,19 @@ func (app *App) Draw(screen *ebiten.Image) {
 		ebitenutil.DebugPrintAt(screen, name, i*100+10, 10)
 	}
 
-	// Draw edges
 	for i, v1 := range app.Graph.Vertices {
 		for j, v2 := range app.Graph.Vertices {
 			if app.Graph.AdjMatrix[i][j] > 0 {
-				ebitenutil.DrawLine(screen, v1.X, v1.Y, v2.X, v2.Y, color.RGBA{0, 0, 0, 255})
+				ebitenutil.DrawLine(screen, v1.X, v1.Y, v2.X, v2.Y, color.RGBA{255, 255, 255, 255})
 			}
 		}
 	}
 
-	// Draw vertices
 	for _, v := range app.Graph.Vertices {
 		ebitenutil.DrawCircle(screen, v.X, v.Y, 15, v.Color)
 		ebitenutil.DebugPrintAt(screen, v.Label, int(v.X)-10, int(v.Y)-5)
 	}
 }
-
 
 // Update processes game logic.
 func (app *App) Update() error {
