@@ -62,16 +62,16 @@ func (g *Graph) AddVertex(x, y float64, label string, clr color.RGBA) {
 	g.AdjMatrix = append(g.AdjMatrix, make([]int, len(g.Vertices)))
 }
 
-// AddEdge adds an edge between two vertices.
-func (g *Graph) AddEdge(v1, v2 int) {
-	if v1 < 0 || v2 < 0 || v1 >= len(g.Vertices) || v2 >= len(g.Vertices) {
-		return
-	}
-	g.AdjMatrix[v1][v2]++
-	if !g.IsDirected {
-		g.AdjMatrix[v2][v1]++
-	}
-}
+// // AddEdge adds an edge between two vertices.
+// func (g *Graph) AddEdge(v1, v2 int) {
+// 	if v1 < 0 || v2 < 0 || v1 >= len(g.Vertices) || v2 >= len(g.Vertices) {
+// 		return
+// 	}
+// 	g.AdjMatrix[v1][v2]++
+// 	if !g.IsDirected {
+// 		g.AdjMatrix[v2][v1]++
+// 	}
+// }
 
 // DeleteVertex removes a vertex and its associated edges.
 func (g *Graph) DeleteVertex(index int) {
@@ -185,8 +185,56 @@ func (app *App) HandleMouseInput() {
 	}
 }
 
-// Draw renders the application.
+// AddEdge adds an edge between two vertices, allowing parallel edges and loops.
+func (g *Graph) AddEdge(v1, v2 int) {
+	if v1 < 0 || v2 < 0 || v1 >= len(g.Vertices) || v2 >= len(g.Vertices) {
+		return
+	}
+	g.AdjMatrix[v1][v2]++
+	if !g.IsDirected && v1 != v2 {
+		g.AdjMatrix[v2][v1]++
+	}
+}
+
+// DrawBézierEdge draws an edge using a Bézier curve.
+func DrawBézierEdge(screen *ebiten.Image, x1, y1, x2, y2, cx, cy float64, clr color.RGBA) {
+	for t := 0.0; t <= 1.0; t += 0.01 {
+		x := (1-t)*(1-t)*x1 + 2*(1-t)*t*cx + t*t*x2
+		y := (1-t)*(1-t)*y1 + 2*(1-t)*t*cy + t*t*y2
+		ebitenutil.DrawRect(screen, x, y, 1, 1, clr)
+	}
+}
+
+// DrawEdges draws edges with support for Bézier curves for parallel edges and loops.
+func (g *Graph) DrawEdges(screen *ebiten.Image) {
+	edgeColor := color.RGBA{255, 0, 0, 255} // Red
+
+	for i, v1 := range g.Vertices {
+		for j, v2 := range g.Vertices {
+			count := g.AdjMatrix[i][j]
+			if count > 0 {
+				if i == j {
+					// Loop: draw a loop around the vertex
+					DrawBézierEdge(screen, v1.X, v1.Y, v1.X+30, v1.Y-30, v1.X-30, v1.Y-30, edgeColor)
+				} else if count == 1 {
+					// Single edge: draw a straight line
+					ebitenutil.DrawLine(screen, v1.X, v1.Y, v2.X, v2.Y, edgeColor)
+				} else {
+					// Parallel edges: draw Bézier curves
+					for k := 0; k < count; k++ {
+						offset := float64(15 * (k - count/2)) // Offset for parallel edges
+						cx, cy := (v1.X+v2.X)/2+offset, (v1.Y+v2.Y)/2-offset
+						DrawBézierEdge(screen, v1.X, v1.Y, v2.X, v2.Y, cx, cy, edgeColor)
+					}
+				}
+			}
+		}
+	}
+}
+
+// Update the Draw method to use the new edge drawing logic.
 func (app *App) Draw(screen *ebiten.Image) {
+	// Draw toolbar
 	for i, name := range toolNames {
 		bgColor := color.RGBA{200, 200, 200, 255}
 		if Tool(i) == app.Tool {
@@ -196,14 +244,10 @@ func (app *App) Draw(screen *ebiten.Image) {
 		ebitenutil.DebugPrintAt(screen, name, i*100+10, 10)
 	}
 
-	for i, v1 := range app.Graph.Vertices {
-		for j, v2 := range app.Graph.Vertices {
-			if app.Graph.AdjMatrix[i][j] > 0 {
-				ebitenutil.DrawLine(screen, v1.X, v1.Y, v2.X, v2.Y, color.RGBA{255, 255, 255, 255})
-			}
-		}
-	}
+	// Draw edges
+	app.Graph.DrawEdges(screen)
 
+	// Draw vertices
 	for _, v := range app.Graph.Vertices {
 		ebitenutil.DrawCircle(screen, v.X, v.Y, 15, v.Color)
 		ebitenutil.DebugPrintAt(screen, v.Label, int(v.X)-10, int(v.Y)-5)
