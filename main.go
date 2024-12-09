@@ -45,11 +45,11 @@ type Graph struct {
 }
 
 type App struct {
-	Graph         *Graph
-	Selected      *int // Index of the selected vertex
-	Tool          Tool // Current active tool
-	EdgeStart     *int // Start vertex for adding an edge
-	MovingVertex  *int // Index of the vertex being moved
+	Graph        *Graph
+	Selected     *int // Index of the selected vertex
+	Tool         Tool // Current active tool
+	EdgeStart    *int // Start vertex for adding an edge
+	MovingVertex *int // Index of the vertex being moved
 	LastClickTime time.Time
 }
 
@@ -61,17 +61,6 @@ func (g *Graph) AddVertex(x, y float64, label string, clr color.RGBA) {
 	}
 	g.AdjMatrix = append(g.AdjMatrix, make([]int, len(g.Vertices)))
 }
-
-// // AddEdge adds an edge between two vertices.
-// func (g *Graph) AddEdge(v1, v2 int) {
-// 	if v1 < 0 || v2 < 0 || v1 >= len(g.Vertices) || v2 >= len(g.Vertices) {
-// 		return
-// 	}
-// 	g.AdjMatrix[v1][v2]++
-// 	if !g.IsDirected {
-// 		g.AdjMatrix[v2][v1]++
-// 	}
-// }
 
 // DeleteVertex removes a vertex and its associated edges.
 func (g *Graph) DeleteVertex(index int) {
@@ -113,14 +102,19 @@ func (app *App) HandleMouseInput() {
 	x, y := ebiten.CursorPosition()
 	mx, my := float64(x), float64(y)
 
-	if y < 40 {
-		// Toolbar interaction
+	if my < 40 {
+		// Toolbar interaction (simple button clicks)
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			app.Tool = Tool(x / 100)
+			// Map toolbar region to tools (assuming 100px wide buttons)
+			toolIndex := int(mx) / 100
+			if toolIndex >= 0 && toolIndex < len(toolNames) {
+				app.Tool = Tool(toolIndex)
+			}
 		}
 		return
 	}
 
+	// Handle other mouse clicks based on current tool
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		switch app.Tool {
 		case ToolAddVertex:
@@ -196,16 +190,23 @@ func (g *Graph) AddEdge(v1, v2 int) {
 	}
 }
 
-// DrawBézierEdge draws an edge using a Bézier curve.
-func DrawBézierEdge(screen *ebiten.Image, x1, y1, x2, y2, cx, cy float64, clr color.RGBA) {
-	for t := 0.0; t <= 1.0; t += 0.01 {
+func DrawLinearBézierEdge(screen *ebiten.Image, x1, y1, x2, y2, cx, cy float64, clr color.RGBA) {
+	for t := 0.0; t <= 1.0; t += 0.001 {
 		x := (1-t)*(1-t)*x1 + 2*(1-t)*t*cx + t*t*x2
 		y := (1-t)*(1-t)*y1 + 2*(1-t)*t*cy + t*t*y2
 		ebitenutil.DrawRect(screen, x, y, 1, 1, clr)
 	}
 }
 
-// DrawEdges draws edges with support for Bézier curves for parallel edges and loops.
+func DrawQuadraticBézierEdge(screen *ebiten.Image, x1, y1, x2, y2, xc1, yc1, xc2, yc2 float64, clr color.RGBA) {
+    for t := 0.0; t <= 1.0; t += 0.001 {
+        // Cubic Bézier curve equation
+        x := (1-t)*(1-t)*(1-t)*x1 + 3*(1-t)*(1-t)*t*xc1 + 3*(1-t)*t*t*xc2 + t*t*t*x2
+        y := (1-t)*(1-t)*(1-t)*y1 + 3*(1-t)*(1-t)*t*yc1 + 3*(1-t)*t*t*yc2 + t*t*t*y2
+        ebitenutil.DrawRect(screen, x, y, 1, 1, clr)
+    }
+}
+
 func (g *Graph) DrawEdges(screen *ebiten.Image) {
 	edgeColor := color.RGBA{255, 0, 0, 255} // Red
 
@@ -214,8 +215,8 @@ func (g *Graph) DrawEdges(screen *ebiten.Image) {
 			count := g.AdjMatrix[i][j]
 			if count > 0 {
 				if i == j {
-					// Loop: draw a loop around the vertex
-					DrawBézierEdge(screen, v1.X, v1.Y, v1.X+30, v1.Y-30, v1.X-30, v1.Y-30, edgeColor)
+					// Loop: Adjust control points for a more realistic curve
+					DrawQuadraticBézierEdge(screen, v1.X, v1.Y, v1.X, v1.Y, v1.X-45, v1.Y-45, v1.X+45, v1.Y-45, edgeColor)
 				} else if count == 1 {
 					// Single edge: draw a straight line
 					ebitenutil.DrawLine(screen, v1.X, v1.Y, v2.X, v2.Y, edgeColor)
@@ -224,7 +225,7 @@ func (g *Graph) DrawEdges(screen *ebiten.Image) {
 					for k := 0; k < count; k++ {
 						offset := float64(15 * (k - count/2)) // Offset for parallel edges
 						cx, cy := (v1.X+v2.X)/2+offset, (v1.Y+v2.Y)/2-offset
-						DrawBézierEdge(screen, v1.X, v1.Y, v2.X, v2.Y, cx, cy, edgeColor)
+						DrawLinearBézierEdge(screen, v1.X, v1.Y, v2.X, v2.Y, cx, cy, edgeColor)
 					}
 				}
 			}
@@ -232,16 +233,19 @@ func (g *Graph) DrawEdges(screen *ebiten.Image) {
 	}
 }
 
-// Update the Draw method to use the new edge drawing logic.
+
+// Draw the toolbar and the selected tool indicator
 func (app *App) Draw(screen *ebiten.Image) {
-	// Draw toolbar
-	for i, name := range toolNames {
-		bgColor := color.RGBA{200, 200, 200, 255}
-		if Tool(i) == app.Tool {
-			bgColor = color.RGBA{100, 100, 255, 255}
+	// Draw toolbar (buttons)
+	for i, toolName := range toolNames {
+		toolColor := color.RGBA{200, 200, 200, 255}
+		if app.Tool == Tool(i) {
+			toolColor = color.RGBA{100, 100, 255, 255} // Highlight selected tool
 		}
-		ebitenutil.DrawRect(screen, float64(i*100), 0, 100, 40, bgColor)
-		ebitenutil.DebugPrintAt(screen, name, i*100+10, 10)
+		// Draw button background
+		ebitenutil.DrawRect(screen, float64(i*100), 0, 100, 40, toolColor)
+		// Draw tool name
+		ebitenutil.DebugPrintAt(screen, toolName, i*100+5, 10)
 	}
 
 	// Draw edges
